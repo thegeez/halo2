@@ -69,11 +69,11 @@
 (def path-peg
   (peg/compile '(capture (some (if-not (choice "?" "#") 1)))))
 
-(def content-length-peg (peg/compile ~(some (choice (sequence "Content-Length: " (cmt (capture (to ,CRLF)) ,scan-number)) 1))))
-
-(defn content-length [buf]
-  (or (first (peg/match content-length-peg buf))
-      0))
+(defn content-length [req]
+  (if-let [content-length-str (or (get-in req [:headers "content-length"])
+                                  (get-in req [:headers "Content-Length"]))]
+    (scan-number content-length-str)
+    0))
 
 (defn expect-header [req]
   (or (get-in req [:headers "Expect"]) (get-in req [:headers "expect"])))
@@ -83,9 +83,9 @@
         (last _)
         (get mime-types _ "text/plain")))
 
-
 (defn close-connection? [req]
-  (let [conn (get-in req [:headers "Connection"])]
+  (let [conn (or (get-in req [:headers "Connection"])
+                 (get-in req [:headers "connection"]))]
     (= "close" conn)))
 
 
@@ -182,8 +182,8 @@
       (defer (do (buffer/clear buf)
                  (:close stream))
         (while (:read stream 1024 buf 7)
-          (when-let [content-length (content-length buf)
-                     request (request buf)
+          (when-let [request (request buf)
+                     content-length (content-length request)
                      request-body (get request :body "")]
             # Early termination / ignore of a request should not drop
             # the connection. This can impact load balancers which
